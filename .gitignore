@@ -1,0 +1,14 @@
+# 編譯產物
+*.exe
+
+# 可由程式重新產生的輸出（網站資料 web/data 例外，GitHub Pages 需要它）
+output/
+simple/output_*/
+
+# 課程教材與報告（不公開）
+*.pdf
+*.pptx
+*.docx
+
+# 編輯器設定
+.vscode/

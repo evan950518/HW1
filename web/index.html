@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>抽樣分配模擬</title>
+<!--
+  SQC HW1 互動展示頁面
+  - 只負責「讀取與繪圖」：所有統計量都由 C++ 主程式（src/main.cpp）預先算好
+      data.js                  分配清單、參數組、趨勢圖用的摘要（一開始就載入）
+      data/{clt,s2}/<參數組>.js 每組參數的詳細資料（選到時才載入）
+  - 不依賴任何外部函式庫，離線雙擊即可開啟
+-->
+<style>
+  :root {
+    --bg: #f4f5f7; --surface: #ffffff; --text: #1d2330; --muted: #667085; --border: #e3e6eb;
+    --grid: #eceef2; --axis: #98a2b3; --bar: #8fb3e6; --bar-edge: #5b8fd6; --curve: #d9480f; --kde: #0b6e4f;
+    --accent: #2563eb; --accent-soft: #e8efff; --good: #15803d; --good-soft: #e7f6ec; --warn: #b45309; --warn-soft: #fdf3e2;
+    --formula: #f7f8fa;
+    --s0: #2563eb; --s1: #ea580c; --s2: #16a34a; --s3: #dc2626; --s4: #7c3aed; --s5: #a16207; --s6: #db2777; --s7: #0891b2; --s8: #475569;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1218; --surface: #181c24; --text: #e6e9ef; --muted: #98a2b3; --border: #2a303c;
+      --grid: #232834; --axis: #5d6677; --bar: #3d5f8f; --bar-edge: #6d97d4; --curve: #ff8a4c; --kde: #5eead4;
+      --accent: #7aa2ff; --accent-soft: #1e2a45; --good: #4ade80; --good-soft: #13291c; --warn: #fbbf24; --warn-soft: #2e2512;
+      --formula: #12161d;
+      --s0: #7aa2ff; --s1: #fb923c; --s2: #4ade80; --s3: #f87171; --s4: #a78bfa; --s5: #facc15; --s6: #f472b6; --s7: #22d3ee; --s8: #cbd5e1;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218; --surface: #181c24; --text: #e6e9ef; --muted: #98a2b3; --border: #2a303c;
+    --grid: #232834; --axis: #5d6677; --bar: #3d5f8f; --bar-edge: #6d97d4; --curve: #ff8a4c; --kde: #5eead4;
+    --accent: #7aa2ff; --accent-soft: #1e2a45; --good: #4ade80; --good-soft: #13291c; --warn: #fbbf24; --warn-soft: #2e2512;
+    --formula: #12161d;
+    --s0: #7aa2ff; --s1: #fb923c; --s2: #4ade80; --s3: #f87171; --s4: #a78bfa; --s5: #facc15; --s6: #f472b6; --s7: #22d3ee; --s8: #cbd5e1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Segoe UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  .tabs { display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 4px; }
+  .tabs button { border: 0; background: none; color: var(--muted); padding: 7px 14px; border-radius: 7px; font: inherit; cursor: pointer; }
+  .tabs button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .card h2 small { color: var(--muted); font-weight: 400; }
+  .controls { display: grid; gap: 12px; margin-bottom: 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px;
+    padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  .label { color: var(--muted); font-size: 12.5px; min-width: 56px; }
+  .group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .group-name {
+    font-size: 11.5px; color: var(--muted); border: 1px dashed var(--border); border-radius: 6px; padding: 2px 8px; margin-right: 2px;
+  }
+  .sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
+  .param { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; }
+  .param .sym { font-family: "Cambria Math", "Times New Roman", serif; font-style: italic; font-size: 15px; min-width: 14px; }
+  .param .chip { padding: 3px 10px; font-variant-numeric: tabular-nums; }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  .nval { font-size: 22px; font-weight: 700; min-width: 64px; font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1 1 260px; accent-color: var(--accent); }
+  .btn {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 7px;
+    padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer;
+  }
+  .btn:hover, .chip:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; user-select: none; }
+  .grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); }
+  .side { display: grid; gap: 14px; align-content: start; }
+  canvas { display: block; width: 100%; }
+  .stretch { display: flex; flex-direction: column; }
+  .stretch canvas { flex: 1 1 auto; }
+  #cvHist { height: 400px; min-height: 400px; } #cvPop { height: 180px; } #cvQQ, #cvTrend { height: 320px; min-height: 320px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+  th, td { text-align: right; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; white-space: normal; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td .sym { color: var(--muted); font-size: 11.5px; display: block; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; }
+  .badge.good { background: var(--good-soft); color: var(--good); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+  .note.warn { color: var(--warn); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .legend .chip { padding: 3px 10px; font-size: 12px; }
+  .legend .chip.off { opacity: .4; text-decoration: line-through; }
+  .bottom { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); margin-top: 14px; }
+  .err { padding: 24px; border: 1px solid var(--warn); color: var(--warn); border-radius: 12px; background: var(--warn-soft); }
+  .loading { opacity: .45; transition: opacity .15s; }
+
+  /* ---- 數學公式排版 ---- */
+  .formula { background: var(--formula); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .formula .eq { font-family: "Cambria Math", "Times New Roman", serif; font-size: 16px; line-height: 2.1; }
+  .formula .eq i { font-style: italic; }
+  .formula .props { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; margin-top: 4px; }
+  .formula .props .k { color: var(--muted); }
+  .formula .props .v { font-family: "Cambria Math", "Times New Roman", serif; font-size: 14.5px; }
+  .formula .sub { color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.5; }
+  .formula .plug { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 13px; }
+  .formula .plug .v { font-family: "Cambria Math", "Times New Roman", serif; font-size: 14.5px; }
+  .frac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; line-height: 1.25; margin: 0 2px; }
+  .frac > span:first-child { border-bottom: 1px solid currentColor; padding: 0 3px 1px; }
+  .frac > span:last-child { padding: 1px 3px 0; }
+  .binom { display: inline-flex; align-items: center; vertical-align: middle; }
+  .binom .paren { font-size: 2em; font-weight: 200; line-height: 1; }
+  .binom .stack { display: inline-flex; flex-direction: column; text-align: center; line-height: 1.15; }
+  sup, sub { font-size: .72em; }
+
+  @media (max-width: 900px) {
+    .grid, .bottom { grid-template-columns: 1fr; }
+    #cvHist { height: 320px; min-height: 320px; } #cvQQ, #cvTrend { height: 280px; min-height: 280px; }
+    .sep { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>抽樣分配模擬</h1>
+      <div class="meta" id="meta"></div>
+    </div>
+    <div class="row">
+      <div class="tabs" id="tabs">
+        <button data-tab="clt">#1-1 中央極限定理（X̄）</button>
+        <button data-tab="s2">#1-2 樣本變異數（S²）</button>
+      </div>
+      <button class="btn" id="themeBtn" title="切換淺色／深色">◐ 主題</button>
+    </div>
+  </header>
+
+  <div id="app">
+    <section class="card controls">
+      <div class="row"><span class="label">母體分配</span><div class="row" id="distChips" style="gap:8px"></div></div>
+      <div class="row"><span class="label">參數</span><div class="row" id="paramChips" style="gap:6px"></div></div>
+      <div class="row" id="tabHintRow"><span class="label"></span><span class="hint" id="tabHint"></span></div>
+      <div class="row">
+        <span class="label">樣本數 n</span>
+        <span class="nval" id="nVal">1</span>
+        <input type="range" id="nSlider" min="1" max="100" step="1" value="1">
+        <button class="btn primary" id="playBtn">▶ 播放</button>
+      </div>
+      <div class="row">
+        <span class="label">快速跳轉</span>
+        <div class="chips" id="quickN"></div>
+        <span style="flex:1"></span>
+        <label class="toggle"><input type="checkbox" id="kdeToggle" checked><span>顯示模擬密度曲線（KDE）</span></label>
+        <label class="toggle"><input type="checkbox" id="viewToggle"><span id="viewToggleText"></span></label>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="card stretch" id="histCard">
+        <h2><span id="histTitle"></span><button class="btn" data-png="cvHist">下載 PNG</button></h2>
+        <canvas id="cvHist"></canvas>
+        <p class="note" id="histNote"></p>
+      </section>
+      <div class="side">
+        <section class="card" id="statsCard">
+          <h2><span>模擬值 vs. 理論值</span><small id="statsSub"></small></h2>
+          <div id="stats"></div>
+          <p class="note" id="statsNote"></p>
+        </section>
+        <section class="card" id="popCard">
+          <h2><span id="popTitle">母體分配</span><button class="btn" data-png="cvPop">下載 PNG</button></h2>
+          <div class="formula" id="formula"></div>
+          <canvas id="cvPop"></canvas>
+          <p class="note" id="popNote"></p>
+        </section>
+      </div>
+    </div>
+
+    <div class="bottom">
+      <section class="card stretch" id="qqCard">
+        <h2><span id="qqTitle">Q-Q 圖</span><button class="btn" data-png="cvQQ">下載 PNG</button></h2>
+        <canvas id="cvQQ"></canvas>
+        <p class="note">點越貼近虛線（y = x），模擬分布越接近理論分布；尾端彎曲代表偏斜或厚尾。</p>
+      </section>
+      <section class="card">
+        <h2>
+          <span>隨 n 的收斂趨勢</span>
+          <span class="row" style="gap:6px"><span class="chips" id="metricChips"></span><button class="btn" data-png="cvTrend">下載 PNG</button></span>
+        </h2>
+        <canvas id="cvTrend"></canvas>
+        <div class="legend" id="legend"></div>
+        <p class="note">x 軸為對數刻度。實線：模擬值；虛線：理論值。每個分配使用目前選定的參數。點選圖例可隱藏／顯示，點擊圖面可直接跳到該 n。</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script>
+"use strict";
+// =====================================================================
+// 0. 資料、延遲載入與狀態
+// =====================================================================
+const D = window.SIM_DATA;
+if (!D || !D.families) {
+  document.getElementById("app").innerHTML =
+    '<div class="err">找不到 data.js（或版本過舊）。請先在 HW1 資料夾執行 <code>sim.exe</code> 產生資料，再重新整理此頁。</div>';
+  throw new Error("data.js not loaded");
+}
+const R = D.meta.R;
+const KS_CRIT = 1.358 / Math.sqrt(R);   // KS 檢定 α = 0.05 的大樣本臨界值
+const FAMS = D.families;
+const famById = Object.fromEntries(FAMS.map((f, i) => [f.id, { ...f, index: i }]));
+
+// 每組參數的詳細資料放在 data/<題目>/<參數組>.js，第一次選到時用 <script> 載入
+// （用 script 而不是 fetch，直接雙擊開啟 file:// 時瀏覽器才不會擋）
+const cache = { clt: {}, s2: {} }, waiting = {};
+window.SIM_LOAD = (tab, key, obj) => {
+  cache[tab][key] = obj;
+  (waiting[tab + "/" + key] || []).forEach((f) => f.resolve(obj));
+  delete waiting[tab + "/" + key];
+};
+function loadDetail(tab, key) {
+  if (cache[tab][key]) return Promise.resolve(cache[tab][key]);
+  const id = tab + "/" + key;
+  return new Promise((resolve, reject) => {
+    if (waiting[id]) return waiting[id].push({ resolve, reject });
+    waiting[id] = [{ resolve, reject }];
+    const s = document.createElement("script");
+    s.src = `data/${tab}/${key}.js`;
+    s.onerror = () => { waiting[id].forEach((f) => f.reject(new Error("無法載入 " + s.src))); delete waiting[id]; };
+    document.head.appendChild(s);
+  });
+}
+
+const state = {
+  tab: "clt",
+  fam: { clt: "exponential", s2: "normal" },   // 各分頁目前的分配
+  choice: Object.fromEntries(FAMS.map((f) => [f.id, f.params.map((p) => p.def)])),  // 各分配目前的參數選擇（兩頁共用）
+  n: { clt: 1, s2: 2 },
+  view: { clt: false, s2: false },  // CLT：標準化 Z；S²：改用 S² 刻度
+  metric: { clt: "skew", s2: "var" },
+  hidden: { clt: new Set(), s2: new Set() },
+  showKde: true,
+  timer: null,
+};
+
+// 由分配與參數選擇找出參數組代號（例：binomial_m10_p0.2）
+function variantKey(famId) {
+  const f = famById[famId], vals = f.params.map((p, i) => p.values[state.choice[famId][i]]);
+  return Object.keys(D.variants).find((k) => {
+    const v = D.variants[k];
+    return v.family === famId && v.values.every((x, i) => x === vals[i]);
+  });
+}
+const curKey = () => variantKey(state.fam[state.tab]);
+const curVar = () => D.variants[curKey()];
+const curFam = () => famById[state.fam[state.tab]];
+const detail = () => cache[state.tab][curKey()];
+const nMin = () => (state.tab === "clt" ? 1 : 2);
+const entry = () => detail().byN[state.n[state.tab] - nMin()];
+const isNormalPop = () => state.fam[state.tab] === "normal";
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const famColor = (id) => cssVar("--s" + (famById[id].index % 9));
+const famsFor = (tab) => FAMS.filter((f) => f.tabs.includes(tab));   // t 分配只出現在 #1-2
+const $ = (id) => document.getElementById(id);
+
+// 數字格式：極小或極大用科學記號
+function fmt(v, digits = 4) {
+  if (v === null || v === undefined || !isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if (a !== 0 && (a < 1e-3 || a >= 1e5)) return v.toExponential(2);
+  return String(Number(v.toPrecision(digits)));
+}
+
+// =====================================================================
+// 1. 分配公式（pmf / pdf、支撐、期望值、變異數）
+// =====================================================================
+const frac = (a, b) => `<span class="frac"><span>${a}</span><span>${b}</span></span>`;
+const binom = (a, b) => `<span class="binom"><span class="paren">(</span><span class="stack"><i>${a}</i><i>${b}</i></span><span class="paren">)</span></span>`;
+
+const FORMULAS = {
+  bernoulli: {
+    f: `<i>p</i>(<i>x</i>) = <i>p</i><sup><i>x</i></sup>(1 − <i>p</i>)<sup>1 − <i>x</i></sup>`,
+    support: `<i>x</i> = 0, 1`, mean: `<i>p</i>`, var: `<i>p</i>(1 − <i>p</i>)`,
+    note: "一次試驗只有成功（1）或失敗（0）；品管中可代表「是否為不良品」。",
+  },
+  binomial: {
+    f: `<i>p</i>(<i>x</i>) = ${binom("m", "x")} <i>p</i><sup><i>x</i></sup>(1 − <i>p</i>)<sup><i>m</i> − <i>x</i></sup>`,
+    support: `<i>x</i> = 0, 1, …, <i>m</i>`, mean: `<i>mp</i>`, var: `<i>mp</i>(1 − <i>p</i>)`,
+    note: "m 次獨立試驗中的成功次數。課本以 n 表示試驗次數，這裡改用 m，避免與樣本數 n 混淆。",
+  },
+  poisson: {
+    f: `<i>p</i>(<i>x</i>) = ${frac(`<i>e</i><sup>−<i>λ</i></sup><i>λ</i><sup><i>x</i></sup>`, `<i>x</i>!`)}`,
+    support: `<i>x</i> = 0, 1, 2, …`, mean: `<i>λ</i>`, var: `<i>λ</i>`,
+    note: "單位時間或空間內事件發生的次數，例如每單位產品的缺點數。",
+  },
+  normal: {
+    f: `<i>f</i>(<i>x</i>) = ${frac("1", `<i>σ</i>√(2π)`)} <i>e</i><sup>−(<i>x</i> − <i>μ</i>)² / (2<i>σ</i>²)</sup>`,
+    support: `−∞ &lt; <i>x</i> &lt; ∞`, mean: `<i>μ</i>`, var: `<i>σ</i>²`,
+    note: "對稱的鐘形分配。母體為常態時，X̄ 對任何 n 都恰好是常態。",
+  },
+  uniform: {
+    f: `<i>f</i>(<i>x</i>) = ${frac("1", `<i>b</i> − <i>a</i>`)}`,
+    support: `<i>a</i> ≤ <i>x</i> ≤ <i>b</i>`, mean: frac(`<i>a</i> + <i>b</i>`, "2"), var: frac(`(<i>b</i> − <i>a</i>)²`, "12"),
+    note: "區間內每個值的機率密度相同；對稱但非常態。",
+  },
+  exponential: {
+    f: `<i>f</i>(<i>x</i>) = ${frac("1", "<i>β</i>")} <i>e</i><sup>−<i>x</i> / <i>β</i></sup>`,
+    support: `<i>x</i> &gt; 0`, mean: `<i>β</i>`, var: `<i>β</i>²`,
+    note: "等待時間或壽命，具無記憶性；β 為平均數（= 1/λ）。",
+  },
+  gamma: {
+    f: `<i>f</i>(<i>x</i>) = ${frac(`<i>x</i><sup><i>α</i> − 1</sup> <i>e</i><sup>−<i>x</i> / <i>β</i></sup>`, `<i>β</i><sup><i>α</i></sup> Γ(<i>α</i>)`)}`,
+    support: `<i>x</i> &gt; 0`, mean: `<i>αβ</i>`, var: `<i>αβ</i>²`,
+    note: "α 為形狀參數、β 為尺度參數；α = 1 時即為 Exponential(β)，χ²ᵥ = Gamma(ν/2, 2)。",
+  },
+  lognormal: {
+    f: `<i>f</i>(<i>x</i>) = ${frac("1", `<i>xσ</i>√(2π)`)} <i>e</i><sup>−(ln <i>x</i> − <i>μ</i>)² / (2<i>σ</i>²)</sup>`,
+    support: `<i>x</i> &gt; 0`, mean: `<i>e</i><sup><i>μ</i> + <i>σ</i>²/2</sup>`,
+    var: `(<i>e</i><sup><i>σ</i>²</sup> − 1) <i>e</i><sup>2<i>μ</i> + <i>σ</i>²</sup>`,
+    note: "ln X ~ N(μ, σ²)；σ 越大越右偏，CLT 收斂越慢。",
+  },
+  t: {
+    f: `<i>f</i>(<i>x</i>) = ${frac(`Γ((<i>ν</i> + 1)/2)`, `√(<i>νπ</i>) Γ(<i>ν</i>/2)`)} (1 + ${frac(`<i>x</i>²`, "<i>ν</i>")})<sup>−(<i>ν</i> + 1)/2</sup>`,
+    support: `−∞ &lt; <i>x</i> &lt; ∞`, mean: `0`, var: `${frac("<i>ν</i>", "<i>ν</i> − 2")}（<i>ν</i> &gt; 2）`,
+    note: "對稱、鐘形但比常態厚尾；超額峰態 6/(ν − 4)（ν > 4），ν 越小尾巴越厚，(n−1)S²/σ² 偏離 χ² 越明顯；ν → ∞ 時趨近 N(0, 1)。" +
+          "ν = 5 時尾巴極厚，模擬的變異數、偏態、峰態會受少數極端值影響而很不穩定（估計它們需要 8 階以上的動差存在）。",
+  },
+};
+
+function renderFormula() {
+  const fam = curFam(), F = FORMULAS[fam.id], v = curVar();
+  const params = fam.params.map((p, i) => `<i>${p.label}</i> = ${v.values[i]}`).join("，");
+  let plug;
+  if (state.tab === "clt") {
+    plug = `代入 ${params}：<i>μ</i> = ${fmt(v.mean)}，<i>σ</i>² = ${fmt(v.var)}<br>
+            依 CLT：<span class="v">X̄ ≈ N(<i>μ</i>, <i>σ</i>²/<i>n</i>) = N(${fmt(v.mean)}, ${fmt(v.var)}/<i>n</i>)</span>`;
+  } else {
+    plug = `代入 ${params}：<i>σ</i>² = ${fmt(v.var)}<br>` + (isNormalPop()
+      ? `依 Theorem 8.4：<span class="v">(<i>n</i> − 1)S²/<i>σ</i>² ~ χ²<sub><i>n</i>−1</sub></span>`
+      : `母體非常態，<span class="v">(<i>n</i> − 1)S²/<i>σ</i>² ~ χ²<sub><i>n</i>−1</sub></span> <b>不成立</b>`);
+  }
+  $("formula").innerHTML = `
+    <div class="eq">${F.f}</div>
+    <div class="props">
+      <span class="k">範圍</span><span class="v">${F.support}</span>
+      <span class="k">期望值</span><span class="v">E(<i>X</i>) = ${F.mean}</span>
+      <span class="k">變異數</span><span class="v">Var(<i>X</i>) = ${F.var}</span>
+    </div>
+    <div class="sub">${F.note}</div>
+    <div class="plug">${plug}</div>`;
+}
+
+// =====================================================================
+// 2. 繪圖基礎：畫布、座標軸、刻度
+// =====================================================================
+const FONT = '"Segoe UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif';
+
+// 依顯示大小設定畫布解析度（至少 2 倍，下載的 PNG 才夠清晰），並塗上背景色
+function prep(cv) {
+  const W = cv.clientWidth, H = cv.clientHeight;
+  const s = Math.max(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(W * s); cv.height = Math.round(H * s);
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+  ctx.fillStyle = cssVar("--surface");
+  ctx.fillRect(0, 0, W, H);
+  return { ctx, W, H };
+}
+
+// 「漂亮」的刻度：間距取 1、2、5 × 10^k
+function niceTicks(a, b, count = 6) {
+  const span = b - a;
+  if (!(span > 0)) return { ticks: [a], dec: 2 };
+  const raw = span / count, mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+  const step = (r < 1.5 ? 1 : r < 3 ? 2 : r < 7 ? 5 : 10) * mag;
+  const ticks = [];
+  for (let v = Math.ceil(a / step) * step; v <= b + step * 1e-9; v += step) ticks.push(Number(v.toFixed(12)));
+  return { ticks, dec: Math.max(0, -Math.floor(Math.log10(step) + 1e-9)) };
+}
+
+// 對數軸刻度：1、2、5 × 10^k
+function logTicks(a, b) {
+  const t = [];
+  for (let e = Math.floor(Math.log10(a)); e <= Math.ceil(Math.log10(b)); e++)
+    for (const c of [1, 2, 5]) { const v = c * Math.pow(10, e); if (v >= a && v <= b) t.push(v); }
+  return t;
+}
+
+// 建立座標框：回傳資料座標 → 畫布座標的轉換函式
+function frame(cv, { xr, yr, xLog = false, yLog = false, xLabel = "", yLabel = "", xTicks = null }) {
+  const { ctx, W, H } = prep(cv);
+  const m = { l: 58, r: 14, t: 12, b: 42 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const lx0 = Math.log(xr[0]), lx1 = Math.log(xr[1]), ly0 = Math.log(yr[0]), ly1 = Math.log(yr[1]);
+  const X = xLog ? (v) => m.l + ((Math.log(v) - lx0) / (lx1 - lx0)) * pw
+                 : (v) => m.l + ((v - xr[0]) / (xr[1] - xr[0])) * pw;
+  const Y = yLog ? (v) => m.t + ph - ((Math.log(v) - ly0) / (ly1 - ly0)) * ph
+                 : (v) => m.t + ph - ((v - yr[0]) / (yr[1] - yr[0])) * ph;
+
+  ctx.font = `11.5px ${FONT}`;
+  ctx.lineWidth = 1;
+  const muted = cssVar("--muted"), grid = cssVar("--grid");
+  const yt = yLog ? { ticks: logTicks(yr[0], yr[1]), dec: null } : niceTicks(yr[0], yr[1], Math.max(3, Math.round(ph / 55)));
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const v of yt.ticks) {
+    const y = Math.round(Y(v)) + 0.5;
+    ctx.strokeStyle = grid; ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(m.l + pw, y); ctx.stroke();
+    ctx.fillStyle = muted; ctx.fillText(yt.dec === null ? fmt(v, 3) : v.toFixed(yt.dec), m.l - 6, y);
+  }
+  let xt;
+  if (xTicks) xt = { ticks: xTicks.filter((v) => v >= xr[0] && v <= xr[1]), dec: 0 };
+  else xt = niceTicks(xr[0], xr[1], Math.max(3, Math.round(pw / 80)));
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (const v of xt.ticks) {
+    const x = Math.round(X(v)) + 0.5;
+    ctx.strokeStyle = grid; ctx.beginPath(); ctx.moveTo(x, m.t); ctx.lineTo(x, m.t + ph); ctx.stroke();
+    ctx.fillStyle = muted; ctx.fillText(v.toFixed(xt.dec), x, m.t + ph + 6);
+  }
+  ctx.strokeStyle = cssVar("--axis");
+  ctx.strokeRect(m.l + 0.5, m.t + 0.5, pw, ph);
+  ctx.fillStyle = muted; ctx.font = `12px ${FONT}`;
+  ctx.fillText(xLabel, m.l + pw / 2, H - 17);
+  ctx.save(); ctx.translate(14, m.t + ph / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textBaseline = "middle"; ctx.fillText(yLabel, 0, 0); ctx.restore();
+
+  const clip = () => { ctx.save(); ctx.beginPath(); ctx.rect(m.l, m.t, pw, ph); ctx.clip(); };
+  return { ctx, X, Y, m, pw, ph, W, H, clip };
+}
+
+function polyline(ctx, pts, color, width = 2, dash = []) {
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
+  ctx.beginPath();
+  let pen = false;
+  for (const [x, y] of pts) {
+    if (!isFinite(x) || !isFinite(y)) { pen = false; continue; }
+    pen ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    pen = true;
+  }
+  ctx.stroke(); ctx.setLineDash([]);
+}
+
+// 圖面右上角的圖例
+function drawLegend(f, items) {
+  const { ctx, m, pw } = f;
+  ctx.font = `12px ${FONT}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+  let y = m.t + 14;
+  for (const it of items) {
+    const tw = ctx.measureText(it.text).width, x = m.l + pw - tw - 34;
+    if (it.type === "bar") { ctx.fillStyle = it.color; ctx.fillRect(x, y - 5, 18, 10); }
+    else polyline(ctx, [[x, y], [x + 18, y]], it.color, 2.5, it.dash || []);
+    ctx.fillStyle = cssVar("--text"); ctx.fillText(it.text, x + 24, y);
+    y += 18;
+  }
+}
+
+// 避免少數極端值（例如 χ²₁ 或 Gamma(α<1) 在 0 附近的尖峰）把整張圖壓扁
+function robustMax(values, ref) {
+  const ys = values.filter(isFinite);
+  if (!ys.length) return 1;
+  const mx = Math.max(...ys);
+  return Math.min(mx, ref * 1.6);
+}
+
+// =====================================================================
+// 3. 目前檢視的座標轉換
+//    CLT 標準化：z = (x − μ)/(σ/√n)；S² 刻度：S² = χ² · σ²/(n−1)
+//    密度要乘上 dx/dz 才能維持面積 = 1
+// =====================================================================
+function viewTransform() {
+  const v = curVar(), e = entry();
+  if (state.tab === "clt") {
+    if (state.view.clt) {
+      const mu = v.mean, se = e.theo.sd;
+      return { tx: (x) => (x - mu) / se, dens: se, xLabel: "Z = (X̄ − μ) / (σ/√n)", curveName: "理論 N(0, 1)" };
+    }
+    return { tx: (x) => x, dens: 1, xLabel: "樣本平均數 X̄", curveName: "理論 N(μ, σ²/n)" };
+  }
+  if (state.view.s2) {
+    const f = v.var / e.df;
+    return { tx: (x) => x * f, dens: 1 / f, xLabel: "樣本變異數 S²", curveName: "理論 σ²·χ²ₙ₋₁/(n−1)" };
+  }
+  return { tx: (x) => x, dens: 1, xLabel: "(n − 1)S² / σ²", curveName: "理論 χ²ₙ₋₁" };
+}
+
+// =====================================================================
+// 4. 主圖：直方圖 + 理論曲線 + KDE
+// =====================================================================
+function drawHist() {
+  const fam = curFam(), v = curVar(), e = entry(), n = state.n[state.tab];
+  const { tx, dens, xLabel, curveName } = viewTransform();
+  const nb = e.counts.length;
+
+  const bars = e.counts.map((c, i) => {
+    const lo = e.lo + i * e.w;
+    return { x0: tx(lo), x1: tx(lo + e.w), d: (c / (R * e.w)) * dens };
+  });
+  const curve = e.curve.y.map((y, j) => [tx(e.curve.x0 + j * e.curve.dx), y * dens]);
+  // KDE 與理論曲線取在相同的 x 點上（由 C++ 算好）
+  const kde = state.showKde ? e.kde.map((y, j) => [tx(e.curve.x0 + j * e.curve.dx), y * dens]) : [];
+
+  let xr = [tx(e.lo), tx(e.lo + nb * e.w)];
+  if (state.tab === "clt" && state.view.clt) xr = [Math.min(xr[0], -4), Math.max(xr[1], 4)];
+  const barMax = Math.max(...bars.map((b) => b.d));
+  const ref = Math.max(barMax, robustMax(kde.map((c) => c[1]), barMax));
+  const yMax = Math.max(ref, robustMax(curve.map((c) => c[1]), ref)) * 1.1;
+
+  const f = frame($("cvHist"), { xr, yr: [0, yMax], xLabel, yLabel: "機率密度" });
+  const { ctx, X, Y } = f;
+  f.clip();
+  ctx.fillStyle = cssVar("--bar"); ctx.strokeStyle = cssVar("--bar-edge"); ctx.lineWidth = 0.8;
+  for (const b of bars) {
+    if (b.d <= 0) continue;
+    const x = X(b.x0), w = X(b.x1) - x, y = Y(b.d);
+    ctx.fillRect(x, y, w, Y(0) - y);
+    if (w > 3) ctx.strokeRect(x + 0.5, y + 0.5, w - 1, Y(0) - y);
+  }
+  polyline(ctx, curve.map(([x, y]) => [X(x), Y(y)]), cssVar("--curve"), 2.5);
+  if (state.showKde) polyline(ctx, kde.map(([x, y]) => [X(x), Y(y)]), cssVar("--kde"), 2.2, [7, 4]);
+  ctx.restore();
+  const legend = [
+    { type: "bar", color: cssVar("--bar"), text: `模擬直方圖（R = ${R.toLocaleString()}）` },
+    { type: "line", color: cssVar("--curve"), text: curveName },
+  ];
+  if (state.showKde) legend.push({ type: "line", color: cssVar("--kde"), dash: [7, 4], text: "模擬密度（KDE）" });
+  drawLegend(f, legend);
+
+  $("histTitle").textContent = state.tab === "clt"
+    ? `X̄ 的抽樣分配：${v.label}，n = ${n}`
+    : `(n−1)S²/σ² 的抽樣分配：${v.label}，n = ${n}（自由度 ${e.df}）`;
+  const out = e.under + e.over;
+  const notes = [];
+  if (out > 0) notes.push(`有 ${out} 筆（${fmt((out / R) * 100, 2)}%）落在顯示範圍外。`);
+  if (fam.discrete) notes.push(state.tab === "clt"
+    ? "離散母體：X̄ 只會是 k/n，直方圖的 bin 已對齊格點，避免出現梳子狀缺口。"
+    : "離散母體：(n−1)S²/σ² 只會落在間距 1/(nσ²) 的格點上，且各格點出現的機率不均勻，直方圖呈鋸齒狀屬正常現象。");
+  if (state.showKde) notes.push(`KDE：高斯核、Silverman 頻寬 h = ${fmt(e.bw / dens, 3)}` +
+    (fam.discrete ? "（離散母體的頻寬至少取格點間距）" : "") + "。");
+  $("histNote").textContent = notes.join(" ");
+}
+
+// =====================================================================
+// 5. 母體分配小圖
+// =====================================================================
+function drawPop() {
+  const v = curVar(), pd = detail().pop;
+  const cv = $("cvPop");
+  if (pd.type === "pmf") {
+    const xr = [pd.x[0] - 0.6, pd.x[pd.x.length - 1] + 0.6];
+    const f = frame(cv, { xr, yr: [0, Math.max(...pd.y) * 1.15], xLabel: "x", yLabel: "P(X = x)" });
+    const { ctx, X, Y } = f;
+    ctx.strokeStyle = cssVar("--accent"); ctx.fillStyle = cssVar("--accent"); ctx.lineWidth = 2;
+    const r = pd.x.length > 25 ? 2.2 : 3.2;
+    pd.x.forEach((x, i) => {
+      ctx.beginPath(); ctx.moveTo(X(x), Y(0)); ctx.lineTo(X(x), Y(pd.y[i])); ctx.stroke();
+      ctx.beginPath(); ctx.arc(X(x), Y(pd.y[i]), r, 0, 2 * Math.PI); ctx.fill();
+    });
+  } else {
+    const pts = pd.y.map((y, j) => [pd.x0 + j * pd.dx, y]);
+    const ys = pts.map((q) => q[1]).filter(isFinite).sort((a, b) => a - b);
+    const typical = ys[Math.floor(ys.length * 0.95)] || 1;   // 用第 95 百分位避免 x → 0 的尖峰
+    const yMax = Math.min(ys[ys.length - 1], typical * 2) * 1.15;
+    const f = frame(cv, { xr: [pts[0][0], pts[pts.length - 1][0]], yr: [0, yMax], xLabel: "x", yLabel: "f(x)" });
+    const { ctx, X, Y } = f;
+    f.clip();
+    ctx.fillStyle = cssVar("--accent-soft");
+    ctx.beginPath(); ctx.moveTo(X(pts[0][0]), Y(0));
+    for (const [x, y] of pts) ctx.lineTo(X(x), Y(isFinite(y) ? y : yMax * 2));
+    ctx.lineTo(X(pts[pts.length - 1][0]), Y(0)); ctx.closePath(); ctx.fill();
+    polyline(ctx, pts.map(([x, y]) => [X(x), Y(y)]), cssVar("--accent"), 2);
+    ctx.restore();
+  }
+  $("popTitle").textContent = `母體：${v.label}`;
+  $("popNote").textContent =
+    `μ = ${fmt(v.mean)}，σ = ${fmt(v.sd)}，偏態 = ${fmt(v.skew, 3)}，超額峰態 = ${fmt(v.exkurt, 3)}`;
+}
+
+// =====================================================================
+// 6. Q-Q 圖
+// =====================================================================
+function drawQQ() {
+  const v = curVar(), e = entry();
+  const { tx } = viewTransform();
+  const pts = state.tab === "clt"
+    ? D.meta.qqZ.map((z, i) => [tx(v.mean + e.theo.sd * z), tx(e.qq[i])])   // 理論分位數：μ + (σ/√n)·z_p
+    : e.qqT.map((t, i) => [tx(t), tx(e.qq[i])]);
+  const all = pts.flat();
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi - lo) * 0.05 || 1; lo -= pad; hi += pad;
+  const f = frame($("cvQQ"), {
+    xr: [lo, hi], yr: [lo, hi],
+    xLabel: state.tab === "clt" ? "理論分位數（常態）" : "理論分位數（χ²ₙ₋₁）",
+    yLabel: "模擬分位數",
+  });
+  const { ctx, X, Y } = f;
+  f.clip();
+  polyline(ctx, [[X(lo), Y(lo)], [X(hi), Y(hi)]], cssVar("--muted"), 1.5, [6, 5]);
+  ctx.fillStyle = cssVar("--curve");
+  for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(X(x), Y(y), 2.8, 0, 2 * Math.PI); ctx.fill(); }
+  ctx.restore();
+  $("qqTitle").textContent = `Q-Q 圖（1%～99% 分位數，n = ${state.n[state.tab]}）`;
+}
+
+// =====================================================================
+// 7. 收斂趨勢圖：各指標隨 n 的變化（資料來自 data.js 的摘要，不需等待載入）
+// =====================================================================
+const METRICS = {
+  clt: {
+    skew:    { name: "偏態", y: "X̄ 的偏態係數", sim: "skew", theo: "tskew", ref: 0 },
+    exkurt:  { name: "超額峰態", y: "X̄ 的超額峰態", sim: "exkurt", theo: "texkurt", ref: 0 },
+    ks:      { name: "KS 距離", y: "KS 距離（vs. 常態）", sim: "ks", ref: KS_CRIT, refName: "5% 臨界值" },
+    sdratio: { name: "SD 比", y: "SD(X̄) ÷ (σ/√n)", sim: "sdratio", ref: 1 },
+  },
+  s2: {
+    // 比值皆為正數且不同母體可差到 100 倍 → 用對數 y 軸
+    var:    { name: "變異數比", y: "Var[(n−1)S²/σ²] ÷ 2(n−1)（對數）", sim: "var", theo: "truevar", ref: 1, yLog: true },
+    skew:   { name: "偏態", y: "偏態係數", sim: "skew", theo: "tskew", shared: true },
+    exkurt: { name: "超額峰態", y: "超額峰態", sim: "exkurt", theo: "texkurt", shared: true },
+    ks:     { name: "KS 距離", y: "KS 距離（vs. χ²ₙ₋₁）", sim: "ks", ref: KS_CRIT, refName: "5% 臨界值" },
+  },
+};
+
+function drawTrend() {
+  const tab = state.tab, M = METRICS[tab][state.metric[tab]];
+  const sel = state.fam[tab], hidden = state.hidden[tab];
+  const n0 = nMin(), nMax = D.meta.nMax;
+  const toPts = (arr) => arr.map((y, i) => [i + n0, y]);
+  const series = [];
+  for (const fam of famsFor(tab)) {
+    if (hidden.has(fam.id)) continue;
+    const T = D.trend[tab][variantKey(fam.id)];
+    const color = famColor(fam.id), isSel = fam.id === sel;
+    series.push({ sel: isSel, pts: toPts(T[M.sim]), dash: [], color, w: isSel ? 3 : 1.6 });
+    // 理論曲線：S² 的偏態／峰態理論值是 χ² 的性質、與母體無關，只畫一次
+    if (M.theo && (!M.shared || isSel))
+      series.push({ sel: isSel, pts: toPts(T[M.theo]), dash: [6, 4], color: M.shared ? cssVar("--muted") : color, w: 1.6 });
+  }
+  const ys = series.flatMap((s) => s.pts.map((q) => q[1])).filter((y) => isFinite(y) && (!M.yLog || y > 0));
+  if (M.ref !== undefined) ys.push(M.ref);
+  if (!ys.length) ys.push(0, 1);
+  let yr;
+  if (M.yLog) yr = [Math.min(...ys) / 1.25, Math.max(...ys) * 1.25];
+  else {
+    const lo = Math.min(...ys, 0), hi = Math.max(...ys), pad = (hi - lo) * 0.06 || 0.1;
+    yr = [lo - (lo < 0 ? pad : 0), hi + pad];
+  }
+  const f = frame($("cvTrend"), {
+    xr: [n0, nMax], yr, xLog: true, yLog: !!M.yLog,
+    xLabel: "樣本數 n（對數刻度）", yLabel: M.y, xTicks: [1, 2, 3, 5, 10, 20, 30, 50, 100],
+  });
+  const { ctx, X, Y, m, pw, ph } = f;
+  f.clip();
+  if (M.ref !== undefined) {
+    polyline(ctx, [[m.l, Y(M.ref)], [m.l + pw, Y(M.ref)]], cssVar("--axis"), 1.2, [3, 3]);
+    if (M.refName) {
+      ctx.fillStyle = cssVar("--muted"); ctx.font = `11.5px ${FONT}`; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+      ctx.fillText(`${M.refName} = ${fmt(M.ref, 3)}`, m.l + 6, Y(M.ref) - 3);
+    }
+  }
+  series.sort((a, b) => a.sel - b.sel);   // 選取的分配畫在最上層
+  for (const s of series) {
+    ctx.globalAlpha = s.sel || s.dash.length ? 1 : 0.55;
+    polyline(ctx, s.pts.map(([x, y]) => [X(x), Y(y)]), s.color, s.w, s.dash);
+  }
+  ctx.globalAlpha = 1;
+  const xn = X(state.n[tab]);
+  polyline(ctx, [[xn, m.t], [xn, m.t + ph]], cssVar("--text"), 1, [2, 3]);
+  ctx.restore();
+}
+
+// =====================================================================
+// 8. 統計量表格
+// =====================================================================
+function relDiff(sim, theo) {
+  if (sim === null || theo === null || !isFinite(sim) || !isFinite(theo)) return "—";
+  if (Math.abs(theo) < 1e-12) return fmt(sim - theo, 2);
+  return (((sim - theo) / Math.abs(theo)) * 100).toFixed(1) + "%";
+}
+
+function renderStats() {
+  const fam = curFam(), v = curVar(), e = entry(), n = state.n[state.tab];
+  let rows;
+  if (state.tab === "clt") {
+    rows = [
+      ["E(X̄)", e.sim.mean, e.theo.mean, "μ"],
+      ["SD(X̄)", e.sim.sd, e.theo.sd, "σ / √n"],
+      ["樣本標準差 S 的平均", e.sim.meanS, v.sd, "σ"],
+      ["偏態", e.sim.skew, e.theo.skew, "γ₁ / √n"],
+      ["超額峰態", e.sim.exkurt, e.theo.exkurt, "γ₂ / n"],
+    ];
+  } else {
+    const k = e.df, s2 = v.var;
+    rows = [
+      ["E[(n−1)S²/σ²]", e.sim.mean, e.theo.mean, "n − 1"],
+      ["Var[(n−1)S²/σ²]", e.sim.sd ** 2, e.theo.sd ** 2, "2(n − 1)"],
+    ];
+    if (!isNormalPop()) rows.push(["　└ 非常態下的真實值", e.sim.sd ** 2, e.theo.trueSd ** 2, "2k + κk²/n"]);
+    rows.push(
+      ["E(S²)", e.sim.meanS2, s2, "σ²"],
+      ["Var(S²)", e.sim.varS2, (2 * s2 * s2) / k, "2σ⁴ / (n − 1)"],
+      ["偏態", e.sim.skew, e.theo.skew, "√(8 / (n−1))"],
+      ["超額峰態", e.sim.exkurt, e.theo.exkurt, "12 / (n−1)"],
+    );
+  }
+  let html = "<table><thead><tr><th>統計量</th><th>模擬</th><th>理論</th><th>差異</th></tr></thead><tbody>";
+  for (const [name, sim, theo, sym] of rows) {
+    html += `<tr><td>${name}<span class="sym">理論：${sym}</span></td><td>${fmt(sim)}</td><td>${fmt(theo)}</td><td>${relDiff(sim, theo)}</td></tr>`;
+  }
+  const pass = e.sim.ks < KS_CRIT;
+  html += `<tr><td>KS 距離<span class="sym">5% 臨界值 ≈ ${fmt(KS_CRIT, 3)}</span></td><td>${fmt(e.sim.ks)}</td><td>—</td>
+           <td><span class="badge ${pass ? "good" : "warn"}">${pass ? "吻合" : "有差異"}</span></td></tr>`;
+  html += "</tbody></table>";
+  $("stats").innerHTML = html;
+  $("statsSub").textContent = `n = ${n}，R = ${R.toLocaleString()}`;
+
+  const notes = [];
+  if (state.tab === "clt") {
+    if (n === 1) notes.push("n = 1 時 X̄ 就是母體本身，S 無定義。");
+    else notes.push("S 是 σ 的偏誤估計量（E(S) < σ），n 小時差異較明顯；S² 才是不偏的。");
+    if (fam.discrete) notes.push("離散母體的 KS 距離已做連續性修正。");
+  } else if (!isNormalPop()) {
+    notes.push("此母體不是常態，Theorem 8.4 的前提不成立：直方圖不會貼合 χ² 曲線，且 n 變大也不會改善。");
+  }
+  $("statsNote").textContent = notes.join(" ");
+  $("statsNote").className = "note" + (state.tab === "s2" && !isNormalPop() ? " warn" : "");
+}
+
+// =====================================================================
+// 9. 控制項
+// =====================================================================
+function renderControls() {
+  const tab = state.tab, famId = state.fam[tab];
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+
+  // 分配：分成離散型與連續型兩組
+  const chip = (f) => `<button class="chip ${f.id === famId ? "on" : ""}" data-fam="${f.id}">
+      <span class="dot" style="background:${famColor(f.id)}"></span>${f.name}</button>`;
+  const group = (name, list) => `<div class="group"><span class="group-name">${name}</span>${list.map(chip).join("")}</div>`;
+  const fams = famsFor(tab);
+  $("distChips").innerHTML = group("離散型", fams.filter((f) => f.discrete)) + '<span class="sep"></span>' +
+                             group("連續型", fams.filter((f) => !f.discrete));
+
+  // 參數：每個參數一組按鈕
+  const fam = famById[famId];
+  $("paramChips").innerHTML = fam.params.map((p, pi) => `<span class="param"><span class="sym">${p.label}</span>` +
+    p.values.map((val, vi) => `<button class="chip ${vi === state.choice[famId][pi] ? "on" : ""}" data-p="${pi}" data-v="${vi}">${val}</button>`).join("") +
+    "</span>").join("");
+
+  $("tabHint").textContent = tab === "clt"
+    ? "提示：同一分配調整參數，可比較偏斜程度不同時，X̄ 收斂到常態的速度。"
+    : "提示：只有 Normal 滿足 Theorem 8.4 的前提，其他分配都是反例。觀察方式：主圖的綠色虛線（模擬）與紅線（χ²ₙ₋₁）是否重合、" +
+      "Q-Q 圖的點是否落在 y = x 上，以及趨勢圖「變異數比」是否維持在 1——非常態母體會停在 1 + κ/2 附近，n 再大也不會回到 1。";
+
+  const s = $("nSlider");
+  s.min = nMin(); s.max = D.meta.nMax; s.value = state.n[tab];
+  $("nVal").textContent = state.n[tab];
+
+  const quick = tab === "clt" ? [1, 2, 5, 10, 30, 50, 100] : [2, 3, 5, 10, 30, 50, 100];
+  $("quickN").innerHTML = quick.map((n) =>
+    `<button class="chip ${n === state.n[tab] ? "on" : ""}" data-n="${n}">n = ${n}</button>`).join("");
+
+  $("viewToggle").checked = state.view[tab];
+  $("viewToggleText").textContent = tab === "clt" ? "標準化顯示（Z 分數，固定座標軸）" : "改以 S² 刻度顯示";
+
+  $("metricChips").innerHTML = Object.entries(METRICS[tab]).map(([k, M]) =>
+    `<button class="chip ${k === state.metric[tab] ? "on" : ""}" data-m="${k}">${M.name}</button>`).join("");
+
+  $("legend").innerHTML = fams.map((f) =>
+    `<button class="chip ${state.hidden[tab].has(f.id) ? "off" : ""}" data-fam="${f.id}" title="${D.variants[variantKey(f.id)].label}">
+       <span class="dot" style="background:${famColor(f.id)}"></span>${f.name}</button>`).join("");
+}
+
+// 重新繪製全部；詳細資料尚未載入時先載入（快速連點時只採用最後一次）
+let renderToken = 0;
+async function render() {
+  renderControls();
+  renderFormula();
+  drawTrend();
+  const token = ++renderToken, tab = state.tab, key = curKey();
+  if (!cache[tab][key]) {
+    document.querySelectorAll("#histCard, #statsCard, #popCard canvas, #qqCard").forEach((el) => el.classList.add("loading"));
+    try { await loadDetail(tab, key); }
+    catch (err) { $("histTitle").textContent = err.message + "（請重新執行 sim.exe）"; return; }
+    if (token !== renderToken) return;
+  }
+  document.querySelectorAll(".loading").forEach((el) => el.classList.remove("loading"));
+  drawHist(); drawPop(); drawQQ(); renderStats();
+}
+
+// 只更新 n 時不需重建控制項（播放動畫時較順暢）
+function setN(n) {
+  const tab = state.tab;
+  n = Math.max(nMin(), Math.min(D.meta.nMax, Math.round(n)));
+  if (n === state.n[tab]) return;
+  state.n[tab] = n;
+  $("nSlider").value = n; $("nVal").textContent = n;
+  document.querySelectorAll("#quickN .chip").forEach((c) => c.classList.toggle("on", +c.dataset.n === n));
+  drawTrend();
+  if (detail()) { drawHist(); drawQQ(); renderStats(); }
+}
+
+function stopPlay() {
+  clearInterval(state.timer); state.timer = null;
+  $("playBtn").textContent = "▶ 播放";
+}
+
+$("playBtn").addEventListener("click", () => {
+  if (state.timer) return stopPlay();
+  if (state.n[state.tab] >= D.meta.nMax) setN(nMin());
+  $("playBtn").textContent = "❚❚ 暫停";
+  state.timer = setInterval(() => {
+    const n = state.n[state.tab];
+    setN(n + (n < 30 ? 1 : n < 60 ? 2 : 4));   // n 小時一步一步走，n 大時加快（變化本來就小）
+    if (state.n[state.tab] >= D.meta.nMax) stopPlay();
+  }, 110);
+});
+
+$("tabs").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  stopPlay(); state.tab = b.dataset.tab; render();
+});
+$("distChips").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-fam]"); if (!b) return;
+  state.fam[state.tab] = b.dataset.fam; state.hidden[state.tab].delete(b.dataset.fam); render();
+});
+$("paramChips").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-p]"); if (!b) return;
+  state.choice[state.fam[state.tab]][+b.dataset.p] = +b.dataset.v; render();
+});
+$("nSlider").addEventListener("input", (ev) => { stopPlay(); setN(+ev.target.value); });
+$("quickN").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  stopPlay(); setN(+b.dataset.n);
+});
+$("viewToggle").addEventListener("change", (ev) => {
+  state.view[state.tab] = ev.target.checked;
+  if (detail()) { drawHist(); drawQQ(); }
+});
+$("kdeToggle").addEventListener("change", (ev) => { state.showKde = ev.target.checked; if (detail()) drawHist(); });
+$("metricChips").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  state.metric[state.tab] = b.dataset.m; renderControls(); drawTrend();
+});
+$("legend").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  const h = state.hidden[state.tab], id = b.dataset.fam;
+  h.has(id) ? h.delete(id) : h.add(id);
+  renderControls(); drawTrend();
+});
+
+// 點擊或拖曳趨勢圖：跳到對應的 n
+(function trendPicker() {
+  const cv = $("cvTrend");
+  let dragging = false;
+  const pick = (ev) => {
+    const rect = cv.getBoundingClientRect(), x = ev.clientX - rect.left;
+    const l = 58, pw = rect.width - 58 - 14, lo = Math.log(nMin()), hi = Math.log(D.meta.nMax);
+    stopPlay(); setN(Math.exp(lo + ((x - l) / pw) * (hi - lo)));
+  };
+  cv.style.cursor = "crosshair";
+  cv.addEventListener("pointerdown", (ev) => { dragging = true; cv.setPointerCapture(ev.pointerId); pick(ev); });
+  cv.addEventListener("pointermove", (ev) => dragging && pick(ev));
+  cv.addEventListener("pointerup", () => (dragging = false));
+})();
+
+// 下載 PNG（檔名包含題目、參數組與 n，方便放進報告）
+document.querySelectorAll("[data-png]").forEach((btn) => btn.addEventListener("click", () => {
+  const cv = $(btn.dataset.png);
+  const name = `${state.tab}_${curKey()}_n${state.n[state.tab]}_${btn.dataset.png.replace("cv", "").toLowerCase()}.png`;
+  cv.toBlob((blob) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+}));
+
+// 主題切換：報告截圖建議用淺色
+$("themeBtn").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  render();
+});
+
+// 視窗大小改變時重畫
+let resizeTimer;
+new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 80); }).observe(document.body);
+
+// 網址參數：#題目/分配或參數組/n/z
+//   例：#clt/binomial_m30_p0.05/10、#s2/exponential/30、#clt/lognormal/30/z（z = 標準化或 S² 刻度）
+function applyHash() {
+  const [tab, id, n, v] = decodeURIComponent(location.hash.slice(1)).split("/");
+  if (!D.trend[tab]) return;
+  state.tab = tab;
+  if (D.variants[id] && famById[D.variants[id].family].tabs.includes(tab)) {   // 指定參數組：同時設定分配與參數
+    const vr = D.variants[id], fam = famById[vr.family];
+    state.fam[tab] = vr.family;
+    state.choice[vr.family] = fam.params.map((p, i) => p.values.indexOf(vr.values[i]));
+  } else if (famById[id] && famById[id].tabs.includes(tab)) {
+    state.fam[tab] = id;
+  }
+  if (n) state.n[tab] = Math.max(tab === "clt" ? 1 : 2, Math.min(D.meta.nMax, +n || 1));
+  state.view[tab] = v === "z";
+}
+window.addEventListener("hashchange", () => { stopPlay(); applyHash(); render(); });
+
+$("meta").textContent =
+  `C++ 模擬資料｜seed = ${D.meta.seed}｜每個 n 重複 R = ${R.toLocaleString()} 次｜${Object.keys(D.variants).length} 組參數｜產生時間 ${D.meta.generated}`;
+applyHash();
+render();
+</script>
+</body>
+</html>
